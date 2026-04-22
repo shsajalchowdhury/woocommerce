@@ -6,11 +6,6 @@ import type { ProductResponseItem } from '@woocommerce/types';
 import type { SelectedAttributes } from '@woocommerce/stores/woocommerce/cart';
 
 /**
- * Internal dependencies
- */
-import { findMatchingVariation } from '../../utils/variations/attribute-matching';
-
-/**
  * Per-element selection for the current product/variation.
  *
  * The "current" product can be set in two ways:
@@ -44,12 +39,15 @@ export type ProductsStoreState = {
 	 */
 	productVariations: Record< number, ProductResponseItem >;
 	/**
-	 * Look up a product by ID, resolving to the matching variation for
-	 * variable products when selectedAttributes are provided.
+	 * Look up a product by ID. When `selectedAttributes` is omitted or
+	 * empty, returns the product for `id`. When `selectedAttributes` is
+	 * provided and the product is variable, returns the matching variation
+	 * or `null` if no variation matches. For non-variable products,
+	 * `selectedAttributes` is ignored.
 	 */
-	findProductVariation: ( args: {
+	findProduct: ( args: {
 		id: number;
-		selectedAttributes?: SelectedAttributes[];
+		selectedAttributes?: SelectedAttributes[] | null;
 	} ) => ProductResponseItem | null;
 	/**
 	 * The current product ID from state or per-element context.
@@ -60,21 +58,26 @@ export type ProductsStoreState = {
 	 */
 	variationId: number | null;
 	/**
-	 * The main product for this page/block. Always the top-level product
-	 * (e.g. the variable product "Hoodie"), never a variation.
-	 * Resolves productId from per-block context when available.
+	 * The top-level product for this page/block (e.g. the variable product
+	 * "Hoodie"), never a variation. Resolves `productId` from per-element
+	 * context when available, otherwise from state. Use this when a block
+	 * specifically needs the parent.
 	 */
-	product: ProductResponseItem | null;
+	parentProductInContext: ProductResponseItem | null;
 	/**
-	 * The currently selected variation, or null if none is selected.
-	 * For simple/grouped products, this is always null.
+	 * The currently selected variation, or `null` when none is selected.
+	 * For simple/grouped products this is always `null`. Resolves
+	 * `variationId` from per-element context when available, otherwise
+	 * from state. Use this when a block specifically needs the variation.
 	 */
-	selectedVariation: ProductResponseItem | null;
+	productVariationInContext: ProductResponseItem | null;
 	/**
-	 * The resolved product for the current context: `selectedVariation`
-	 * if one is set, otherwise the main `product`. This is the property
-	 * most blocks should bind to — use `product` / `selectedVariation`
-	 * explicitly only when the distinction matters.
+	 * The resolved product for the current context: `productVariationInContext`
+	 * when a variation is selected, otherwise `parentProductInContext`.
+	 *
+	 * This is the property most blocks should bind to — use
+	 * `parentProductInContext` or `productVariationInContext` explicitly
+	 * only when the parent/variation distinction matters.
 	 *
 	 * Blocks can bind directly to properties, e.g.:
 	 *   state.productInContext.stock_availability.text
@@ -95,6 +98,21 @@ const universalLock =
 	'I acknowledge that using a private store means my plugin will inevitably break on the next store release.';
 
 /**
+ * Normalize attribute name by stripping the 'attribute_' or 'attribute_pa_'
+ * prefix that WooCommerce adds for variation attributes, and replacing
+ * hyphens with spaces so that slugs (e.g., "some-name") match labels
+ * (e.g., "some name").
+ */
+const normalizeAttributeName = ( name: string ): string =>
+	name
+		.replace( /^attribute_(pa_)?/, '' )
+		.replace( /-/g, ' ' )
+		.toLowerCase();
+
+const attributeNamesMatch = ( a: string, b: string ): boolean =>
+	normalizeAttributeName( a ) === normalizeAttributeName( b );
+
+/**
  * The woocommerce/products store.
  *
  * Server-hydrated cache of product and variation data in Store API format
@@ -112,12 +130,12 @@ const { state: productsState } = store< ProductsStore >(
 		state: {
 			products: {},
 			productVariations: {},
-			findProductVariation( {
+			findProduct( {
 				id,
 				selectedAttributes,
 			}: {
 				id: number;
-				selectedAttributes?: SelectedAttributes[];
+				selectedAttributes?: SelectedAttributes[] | null;
 			} ): ProductResponseItem | null {
 				const product = productsState.products[ id ];
 
@@ -126,29 +144,46 @@ const { state: productsState } = store< ProductsStore >(
 				}
 
 				if (
-					product.type === 'variable' &&
-					selectedAttributes?.length
+					product.type !== 'variable' ||
+					! selectedAttributes?.length
 				) {
-					const matchedVariation = findMatchingVariation(
-						product,
-						selectedAttributes
-					);
-
-					if ( ! matchedVariation ) {
-						return null;
-					}
-
-					return (
-						productsState.productVariations[
-							matchedVariation.id
-						] ?? null
-					);
+					return product;
 				}
 
-				return product;
+				const matchedVariation = product.variations?.find(
+					( variation ) =>
+						variation.attributes.every( ( attr ) => {
+							const selectedAttr = selectedAttributes.find(
+								( selected ) =>
+									attributeNamesMatch(
+										attr.name,
+										selected.attribute
+									)
+							);
+
+							// A null variation attribute value matches "Any".
+							if ( attr.value === null ) {
+								return (
+									selectedAttr !== undefined &&
+									selectedAttr.value !== null
+								);
+							}
+
+							return selectedAttr?.value === attr.value;
+						} )
+				);
+
+				if ( ! matchedVariation ) {
+					return null;
+				}
+
+				return (
+					productsState.productVariations[ matchedVariation.id ] ??
+					null
+				);
 			},
 
-			get product(): ProductResponseItem | null {
+			get parentProductInContext(): ProductResponseItem | null {
 				const context = getContext< ProductContext >(
 					'woocommerce/products'
 				);
@@ -162,7 +197,7 @@ const { state: productsState } = store< ProductsStore >(
 				return productsState.products[ productId ] ?? null;
 			},
 
-			get selectedVariation(): ProductResponseItem | null {
+			get productVariationInContext(): ProductResponseItem | null {
 				const context = getContext< ProductContext >(
 					'woocommerce/products'
 				);
@@ -176,7 +211,10 @@ const { state: productsState } = store< ProductsStore >(
 			},
 
 			get productInContext(): ProductResponseItem | null {
-				return productsState.selectedVariation || productsState.product;
+				return (
+					productsState.productVariationInContext ||
+					productsState.parentProductInContext
+				);
 			},
 		},
 	},
