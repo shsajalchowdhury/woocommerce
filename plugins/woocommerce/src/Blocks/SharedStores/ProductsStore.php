@@ -16,8 +16,9 @@ use InvalidArgumentException;
  *   methods below, each keyed by ID.
  * - Selection (`productId`, `variationId`) — set by callers via
  *   `wp_interactivity_state` (global) or `data-wp-context` (per-element) —
- *   plus the derived getters (`product`, `selectedVariation`,
- *   `productInContext`) registered by `register_getters()`.
+ *   plus the derived getters (`parentProductInContext`,
+ *   `productVariationInContext`, `productInContext`) registered by
+ *   `register_getters()`.
  *
  * The derived getters are mirrored in the JS store
  * (client/blocks/assets/js/base/stores/woocommerce/products.ts) so that
