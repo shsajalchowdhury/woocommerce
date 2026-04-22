@@ -202,7 +202,9 @@ const { actions } = store< MergedAddToCartWithOptionsStores >(
 					};
 				}
 
-				if ( productsState.parentProductInContext?.type === 'grouped' ) {
+				if (
+					productsState.parentProductInContext?.type === 'grouped'
+				) {
 					actions.validateGroupedProductQuantity();
 				} else {
 					actions.validateQuantity( productId, value );

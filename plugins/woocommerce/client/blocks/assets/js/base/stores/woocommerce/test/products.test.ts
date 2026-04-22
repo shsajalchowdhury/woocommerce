@@ -87,18 +87,18 @@ describe( 'woocommerce/products store – product context derived state', () => 
 			mockRegisteredStore!.state.productId = 42;
 			mockRegisteredStore!.state.variationId = null;
 
-			expect(
-				mockRegisteredStore!.state.parentProductInContext
-			).toBe( mockProduct );
+			expect( mockRegisteredStore!.state.parentProductInContext ).toBe(
+				mockProduct
+			);
 		} );
 
 		it( 'returns the product even when variationId is set (never a variation)', () => {
 			mockRegisteredStore!.state.productId = 42;
 			mockRegisteredStore!.state.variationId = 99;
 
-			expect(
-				mockRegisteredStore!.state.parentProductInContext
-			).toBe( mockProduct );
+			expect( mockRegisteredStore!.state.parentProductInContext ).toBe(
+				mockProduct
+			);
 		} );
 
 		it( 'returns null when product is not in the store', () => {
@@ -175,9 +175,9 @@ describe( 'woocommerce/products store – product context derived state', () => 
 			mockRegisteredStore!.state.productId = 42;
 			mockRegisteredStore!.state.variationId = 99;
 
-			expect(
-				mockRegisteredStore!.state.productVariationInContext
-			).toBe( mockVariation );
+			expect( mockRegisteredStore!.state.productVariationInContext ).toBe(
+				mockVariation
+			);
 		} );
 
 		it( 'returns null when variation is not in the store', () => {
@@ -340,9 +340,9 @@ describe( 'woocommerce/products store – product context derived state', () => 
 			} as unknown as ProductResponseItem;
 			mockRegisteredStore!.state.products[ 1 ] = variableProduct;
 
-			expect(
-				mockRegisteredStore!.state.findProduct( { id: 1 } )
-			).toBe( variableProduct );
+			expect( mockRegisteredStore!.state.findProduct( { id: 1 } ) ).toBe(
+				variableProduct
+			);
 			expect(
 				mockRegisteredStore!.state.findProduct( {
 					id: 1,
@@ -418,9 +418,7 @@ describe( 'woocommerce/products store – product context derived state', () => 
 
 			const result = mockRegisteredStore!.state.findProduct( {
 				id: 1,
-				selectedAttributes: [
-					{ attribute: 'Color', value: 'blue' },
-				],
+				selectedAttributes: [ { attribute: 'Color', value: 'blue' } ],
 			} );
 
 			expect( result ).toBeNull();
