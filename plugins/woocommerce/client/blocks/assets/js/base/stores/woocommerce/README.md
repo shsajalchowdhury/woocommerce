@@ -36,11 +36,11 @@ PHP                                                  Client
 └────────────┬──────────────────────┘               │ state.products             │
              │                                      │ state.productVariations    │
              ▼                                      │                            │
-   wp_interactivity_state(                          │ Derived getters:           │
-     'woocommerce/products',                        │ • state.product            │
-     [ 'products' => ..., ... ]                     │ • state.selectedVariation  │
-   )                                                │ • state.productInContext   │
-                                                    └────────────┬───────────────┘
+   wp_interactivity_state(                          │ Derived getters:                  │
+     'woocommerce/products',                        │ • state.parentProductInContext    │
+     [ 'products' => ..., ... ]                     │ • state.productVariationInContext │
+   )                                                │ • state.productInContext          │
+                                                    └────────────┬──────────────────────┘
                                                                  │
  Selection (one of):                                             ▼
  • Global: wp_interactivity_state(..., [        Directives bound in markup:
@@ -59,16 +59,16 @@ Derived getters mirror each other in JS (`products.ts`) and PHP (`ProductsStore:
 
 ### State reference
 
-| Property               | Type                                                          | Origin                    | Notes                                                                                            |
-| ---------------------- | ------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------ |
-| `products`             | `Record<number, ProductResponseItem>`                         | Populated from PHP        | Keyed by product ID.                                                                             |
-| `productVariations`    | `Record<number, ProductResponseItem>`                         | Populated from PHP        | Keyed by variation ID.                                                                           |
-| `productId`            | `number`                                                      | Populated / local context | Current product ID.                                                                              |
-| `variationId`          | `number \| null`                                              | Populated / local context | Current variation ID, or `null`.                                                                 |
-| `product`              | `ProductResponseItem \| null`                                 | Derived                   | The top-level product for the current context. Always the parent product, **never** a variation. |
-| `selectedVariation`    | `ProductResponseItem \| null`                                 | Derived                   | Currently selected variation, or `null` for simple/grouped/non-selected.                         |
-| `productInContext`     | `ProductResponseItem \| null`                                 | Derived                   | `selectedVariation ?? product`. Bind to this in the common case.                                 |
-| `findProductVariation` | `({ id, selectedAttributes }) => ProductResponseItem \| null` | Function                  | Resolves a variable product + attributes to a concrete variation.                                |
+| Property                    | Type                                                          | Origin                    | Notes                                                                                                                    |
+| --------------------------- | ------------------------------------------------------------- | ------------------------- | ------------------------------------------------------------------------------------------------------------------------ |
+| `products`                  | `Record<number, ProductResponseItem>`                         | Populated from PHP        | Keyed by product ID.                                                                                                     |
+| `productVariations`         | `Record<number, ProductResponseItem>`                         | Populated from PHP        | Keyed by variation ID.                                                                                                   |
+| `productId`                 | `number`                                                      | Populated / local context | Current product ID.                                                                                                      |
+| `variationId`               | `number \| null`                                              | Populated / local context | Current variation ID, or `null`.                                                                                         |
+| `parentProductInContext`    | `ProductResponseItem \| null`                                 | Derived                   | The top-level product for the current context. Always the parent product, **never** a variation. Use when you need the parent explicitly. |
+| `productVariationInContext` | `ProductResponseItem \| null`                                 | Derived                   | Currently selected variation, or `null` for simple/grouped/non-selected. Use when you need the variation explicitly.     |
+| `productInContext`          | `ProductResponseItem \| null`                                 | Derived                   | `productVariationInContext` when a variation is selected, otherwise `parentProductInContext`. **Bind to this in the common case.** |
+| `findProduct`               | `({ id, selectedAttributes }) => ProductResponseItem \| null` | Function                  | Look up a product by ID. When `selectedAttributes` is empty/omitted, returns the product. When provided on a variable product, returns the matching variation (or `null`). |
 
 ### Populating state (PHP)
 
@@ -179,7 +179,7 @@ $interactive_attributes = $is_interactive
     : '';
 ```
 
-Any `ProductResponseItem` field can be bound the same way, e.g. `state.productInContext.price_html`, `state.productInContext.stock_availability.text`, `state.product.name`.
+Any `ProductResponseItem` field can be bound the same way, e.g. `state.productInContext.price_html`, `state.productInContext.stock_availability.text`, `state.parentProductInContext.name`.
 
 #### From JS (client)
 
@@ -212,9 +212,7 @@ if ( ! product ) {
 
 #### Resolving a variation by attributes
 
-Use `state.findProductVariation({ id, selectedAttributes })` when you have a variable product ID and a set of selected attributes and want the concrete variation.
-
-From `base/utils/variations/does-cart-item-match-attributes.ts`:
+Use `state.findProduct({ id, selectedAttributes })` when you have a product ID and optionally a set of selected attributes. Without attributes, it returns the product stored under that ID. With attributes on a variable product, it returns the concrete matching variation (or `null` if no variation matches). For non-variable products the attributes are ignored.
 
 ```ts
 const { state: productsState } = store< ProductsStore >(
@@ -223,18 +221,21 @@ const { state: productsState } = store< ProductsStore >(
 	{ lock: universalLock }
 );
 
-const parentProductId = productsState.productVariations[ cartItem.id ]?.parent;
-const productAttributes =
-	productsState.products[ parentProductId ]?.attributes ?? [];
+// Resolve a variable product + attributes to the concrete variation.
+const variation = productsState.findProduct( {
+	id: parentProductId,
+	selectedAttributes,
+} );
+if ( variation ) {
+	// variation.id, variation.sku, variation.prices.price, ...
+}
 ```
-
-For variable products, `findProductVariation` returns `null` when no variation matches; for simple products it returns the product itself.
 
 ### Patterns and pitfalls
 
--   **Always load before you bind.** If `wc_interactivity_api_load_product` was never called for the current `productId`, `state.product` resolves to `null` and directive bindings silently render empty.
--   **Prefer `productInContext`** for "whatever is currently being shown". Use `product` / `selectedVariation` only when the distinction matters (e.g. rendering a variation-specific description vs. the parent title).
+-   **Always load before you bind.** If `wc_interactivity_api_load_product` was never called for the current `productId`, `state.parentProductInContext` resolves to `null` and directive bindings silently render empty.
+-   **Prefer `productInContext`** for "whatever is currently being shown". Use `parentProductInContext` / `productVariationInContext` only when the distinction matters (e.g. rendering a variation-specific description vs. the parent title).
 -   **`data-wp-context` sets local context.** Use it whenever the same block type can appear multiple times on a page for different products.
--   **Local context beats state.** If a block is wrapped in a `data-wp-context="woocommerce/products::{ ... }"` element, its `productId` / `variationId` override any globally-set values for descendants of that element. See `test/products.test.ts` for the exact precedence rules — notably, a context that has `productId` but no `variationId` key does **not** fall back to the global `variationId`.
+-   **Local context takes precedence.** If a block is wrapped in a `data-wp-context="woocommerce/products::{ ... }"` element, its `productId` / `variationId` override any globally-set values for descendants of that element. See `test/products.test.ts` for the exact resolution cases.
 -   **Keep the consent string in sync.** The literal string is defined in `ProductsStore::$consent_statement` (PHP) and `universalLock` (JS). They are intentionally different (loaders vs. store lock); copy-paste from this README or the source files.
 -   **Do not extend this store from third-party code.** It is `lock: true` and private by design; anything here can change or disappear without notice.
