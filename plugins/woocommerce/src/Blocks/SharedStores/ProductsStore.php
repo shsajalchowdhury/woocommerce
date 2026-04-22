@@ -93,10 +93,11 @@ class ProductsStore {
 	 *
 	 * These closures mirror the JS getters in
 	 * client/blocks/assets/js/base/stores/woocommerce/products.ts so that
-	 * directives referencing state.product / state.selectedVariation /
-	 * state.productInContext resolve during SSR. Because they read from
-	 * wp_interactivity_state() at call time, they only need to be
-	 * registered once regardless of how many products are added.
+	 * directives referencing state.parentProductInContext /
+	 * state.productVariationInContext / state.productInContext resolve
+	 * during SSR. Because they read from wp_interactivity_state() at call
+	 * time, they only need to be registered once regardless of how many
+	 * products are added.
 	 *
 	 * @return void
 	 */
@@ -110,7 +111,7 @@ class ProductsStore {
 		wp_interactivity_state(
 			self::$store_namespace,
 			array(
-				'product'           => function () {
+				'parentProductInContext'    => function () {
 					$context    = wp_interactivity_get_context();
 					$state      = wp_interactivity_state( self::$store_namespace );
 					$product_id = ! empty( $context )
@@ -123,7 +124,7 @@ class ProductsStore {
 
 					return $state['products'][ $product_id ] ?? null;
 				},
-				'selectedVariation' => function () {
+				'productVariationInContext' => function () {
 					$context      = wp_interactivity_get_context();
 					$state        = wp_interactivity_state( self::$store_namespace );
 					$variation_id = ! empty( $context )
@@ -136,19 +137,19 @@ class ProductsStore {
 
 					return $state['productVariations'][ $variation_id ] ?? null;
 				},
-				'productInContext'  => function () {
+				'productInContext'          => function () {
 					$state    = wp_interactivity_state( self::$store_namespace );
-					$selected = $state['selectedVariation'] instanceof \Closure
-						? $state['selectedVariation']()
-						: $state['selectedVariation'];
+					$selected = $state['productVariationInContext'] instanceof \Closure
+						? $state['productVariationInContext']()
+						: $state['productVariationInContext'];
 
 					if ( $selected ) {
 						return $selected;
 					}
 
-					return $state['product'] instanceof \Closure
-						? $state['product']()
-						: $state['product'];
+					return $state['parentProductInContext'] instanceof \Closure
+						? $state['parentProductInContext']()
+						: $state['parentProductInContext'];
 				},
 			)
 		);
