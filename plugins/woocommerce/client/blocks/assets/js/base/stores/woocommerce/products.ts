@@ -19,7 +19,7 @@ import type { SelectedAttributes } from '@woocommerce/stores/woocommerce/cart';
  * See ./README.md for the full model and precedence rules.
  */
 type ProductContext = {
-	productId: number;
+	productId?: number;
 	variationId?: number | null;
 };
 
@@ -187,9 +187,7 @@ const { state: productsState } = store< ProductsStore >(
 				const context = getContext< ProductContext >(
 					'woocommerce/products'
 				);
-				const productId = context
-					? context.productId
-					: productsState.productId;
+				const productId = context?.productId ?? productsState.productId;
 
 				if ( ! productId ) {
 					return null;
@@ -201,9 +199,8 @@ const { state: productsState } = store< ProductsStore >(
 				const context = getContext< ProductContext >(
 					'woocommerce/products'
 				);
-				const variationId = context
-					? context.variationId
-					: productsState.variationId;
+				const variationId =
+					context?.variationId ?? productsState.variationId;
 				if ( ! variationId ) {
 					return null;
 				}
