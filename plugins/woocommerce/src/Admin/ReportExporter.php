@@ -53,17 +53,6 @@ class ReportExporter {
 	}
 
 	/**
-	 * Add action dependencies.
-	 *
-	 * @return array
-	 */
-	public static function get_dependencies() {
-		return array(
-			'email_report_download_link' => self::get_action( 'export_report' ),
-		);
-	}
-
-	/**
 	 * Hook in action methods.
 	 */
 	public static function init() {
@@ -91,16 +80,13 @@ class ReportExporter {
 		$batch_size  = $exporter->get_limit();
 		$num_batches = (int) ceil( $total_rows / $batch_size );
 
-		// Create batches, like initial import.
-		$report_batch_args = array( $export_id, $report_type, $report_args );
+		// Pass the requesting user ID through batch args so the last batch to
+		// complete can schedule the email action after all exports are done.
+		$user_id           = $send_email ? get_current_user_id() : 0;
+		$report_batch_args = array( $export_id, $report_type, $report_args, $user_id );
 
 		if ( 0 < $num_batches ) {
 			self::queue_batches( 1, $num_batches, 'export_report', $report_batch_args );
-
-			if ( $send_email ) {
-				$email_action_args = array( get_current_user_id(), $export_id, $report_type );
-				self::schedule_action( 'email_report_download_link', $email_action_args );
-			}
 		}
 
 		return $total_rows;
@@ -113,9 +99,10 @@ class ReportExporter {
 	 * @param string $export_id Unique ID for report (timestamp expected).
 	 * @param string $report_type Report type. E.g. 'customers'.
 	 * @param array  $report_args Report parameters, passed to data query.
+	 * @param int    $user_id  Optional. User ID that requested the email. 0 = no email.
 	 * @return void
 	 */
-	public static function export_report( $page_number, $export_id, $report_type, $report_args ) {
+	public static function export_report( $page_number, $export_id, $report_type, $report_args, $user_id = 0 ) {
 		$report_args['page'] = $page_number;
 
 		$exporter = new ReportCSVExporter( $report_type, $report_args );
@@ -123,6 +110,15 @@ class ReportExporter {
 		$exporter->generate_file();
 
 		self::update_export_percentage_complete( $report_type, $export_id, $exporter->get_percent_complete() );
+
+		// If an email was requested, check whether this is the last pending export.
+		// Only schedule the email action when no more export batches remain.
+		if ( $user_id && ! self::has_pending_export_actions( $export_id ) ) {
+			self::schedule_action(
+				'email_report_download_link',
+				array( $user_id, $export_id, $report_type )
+			);
+		}
 	}
 
 	/**
@@ -148,7 +144,10 @@ class ReportExporter {
 		$exports_status = get_option( self::EXPORT_STATUS_OPTION, array() );
 		$status_key     = self::get_status_key( $report_type, $export_id );
 
-		$exports_status[ $status_key ] = $percentage;
+		// Ensure progress never moves backwards when batches complete out of order.
+		$current = isset( $exports_status[ $status_key ] ) ? (int) $exports_status[ $status_key ] : 0;
+
+		$exports_status[ $status_key ] = max( $current, (int) $percentage );
 
 		update_option( self::EXPORT_STATUS_OPTION, $exports_status );
 	}
@@ -169,6 +168,46 @@ class ReportExporter {
 		}
 
 		return false;
+	}
+
+	/**
+	 * Check whether there are pending export actions for a given export.
+	 *
+	 * Checks for both direct export_report actions and queue_batches actions
+	 * that may schedule additional export_report actions.
+	 *
+	 * @param string $export_id Unique ID for report.
+	 * @return bool True when pending actions exist.
+	 */
+	protected static function has_pending_export_actions( $export_id ) {
+		$pending_exports = self::queue()->search(
+			array(
+				'status'   => 'pending',
+				'per_page' => 1,
+				'claimed'  => false,
+				'hook'     => self::get_action( 'export_report' ),
+				'search'   => $export_id,
+				'group'    => self::$group,
+			)
+		);
+
+		if ( ! empty( $pending_exports ) ) {
+			return true;
+		}
+
+		// Also check for pending queue_batches actions that may create more export_report actions.
+		$pending_batches = self::queue()->search(
+			array(
+				'status'   => 'pending',
+				'per_page' => 1,
+				'claimed'  => false,
+				'hook'     => self::get_action( 'queue_batches' ),
+				'search'   => $export_id,
+				'group'    => self::$group,
+			)
+		);
+
+		return ! empty( $pending_batches );
 	}
 
 	/**
@@ -197,18 +236,14 @@ class ReportExporter {
 	 * @return void
 	 */
 	public static function email_report_download_link( $user_id, $export_id, $report_type ) {
-		$percent_complete = self::get_export_percentage_complete( $report_type, $export_id );
+		$query_args   = array(
+			'action'   => self::DOWNLOAD_EXPORT_ACTION,
+			'filename' => "wc-{$report_type}-report-export-{$export_id}",
+		);
+		$download_url = add_query_arg( $query_args, admin_url() );
 
-		if ( 100 === $percent_complete ) {
-			$query_args   = array(
-				'action'   => self::DOWNLOAD_EXPORT_ACTION,
-				'filename' => "wc-{$report_type}-report-export-{$export_id}",
-			);
-			$download_url = add_query_arg( $query_args, admin_url() );
-
-			\WC_Emails::instance();
-			$email = new ReportCSVEmail();
-			$email->trigger( $user_id, $report_type, $download_url );
-		}
+		\WC_Emails::instance();
+		$email = new ReportCSVEmail();
+		$email->trigger( $user_id, $report_type, $download_url );
 	}
 }

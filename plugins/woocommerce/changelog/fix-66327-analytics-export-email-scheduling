@@ -1,0 +1,4 @@
+Significance: patch
+Type: fix
+
+Schedule the analytics report export download email only after all export batches have completed, preventing the email from being silently skipped when Action Scheduler batches finish out of order.
